@@ -43,9 +43,9 @@ namespace tinyaes
         if (rounds == 0)
             return Result::InvalidKeySize;
         if (iv.size() != 16)
-            return Result::InvalidInput;
+            return Result::InvalidIVSize;
         if (input.empty())
-            return Result::InvalidInput;
+            return Result::InvalidInputSize;
 
         uint32_t rk[internal::AES_MAX_RK_WORDS];
         auto key_expand = internal::get_key_expand();
@@ -83,7 +83,73 @@ namespace tinyaes
 
         secure_zero(rk, sizeof(rk));
         secure_zero(ctr, sizeof(ctr));
-        return Result::Success;
+        return Result::Ok;
+    }
+
+    // Build a 16-byte IV from 12-byte nonce + 4-byte counter starting at 1
+    static std::vector<uint8_t> nonce_to_iv(const std::vector<uint8_t> &nonce)
+    {
+        std::vector<uint8_t> iv(16, 0);
+        std::memcpy(iv.data(), nonce.data(), 12);
+        iv[15] = 1; // big-endian counter = 1
+        return iv;
+    }
+
+    Result ctr_encrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce,
+        const std::vector<uint8_t> &plaintext,
+        std::vector<uint8_t> &ciphertext)
+    {
+        if (nonce.size() != 12)
+            return Result::InvalidNonceSize;
+        auto iv = nonce_to_iv(nonce);
+        return ctr_crypt(key, iv, plaintext, ciphertext);
+    }
+
+    Result ctr_encrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &plaintext,
+        std::vector<uint8_t> &nonce_and_ciphertext)
+    {
+        auto nonce = generate_nonce();
+        if (nonce.empty())
+            return Result::InternalError;
+
+        std::vector<uint8_t> ct;
+        auto result = ctr_encrypt(key, nonce, plaintext, ct);
+        if (result != Result::Ok)
+            return result;
+
+        nonce_and_ciphertext.resize(12 + ct.size());
+        std::memcpy(nonce_and_ciphertext.data(), nonce.data(), 12);
+        std::memcpy(nonce_and_ciphertext.data() + 12, ct.data(), ct.size());
+        return Result::Ok;
+    }
+
+    Result ctr_decrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce,
+        const std::vector<uint8_t> &ciphertext,
+        std::vector<uint8_t> &plaintext)
+    {
+        if (nonce.size() != 12)
+            return Result::InvalidNonceSize;
+        auto iv = nonce_to_iv(nonce);
+        return ctr_crypt(key, iv, ciphertext, plaintext);
+    }
+
+    Result ctr_decrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce_and_ciphertext,
+        std::vector<uint8_t> &plaintext)
+    {
+        if (nonce_and_ciphertext.size() < 13)
+            return Result::InvalidInputSize;
+
+        std::vector<uint8_t> nonce(nonce_and_ciphertext.begin(), nonce_and_ciphertext.begin() + 12);
+        std::vector<uint8_t> ct(nonce_and_ciphertext.begin() + 12, nonce_and_ciphertext.end());
+        return ctr_decrypt(key, nonce, ct, plaintext);
     }
 
 } // namespace tinyaes
@@ -98,9 +164,9 @@ extern "C" int tinyaes_ctr_crypt(
     size_t output_len)
 {
     if (!key || !iv || !input || !output)
-        return TINYAES_ERROR_INVALID_INPUT;
+        return TINYAES_INVALID_INPUT_SIZE;
     if (output_len < input_len)
-        return TINYAES_ERROR_BUFFER_TOO_SMALL;
+        return TINYAES_INVALID_INPUT_SIZE;
 
     std::vector<uint8_t> k(key, key + key_len);
     std::vector<uint8_t> v(iv, iv + 16);
@@ -109,10 +175,74 @@ extern "C" int tinyaes_ctr_crypt(
 
     auto result = tinyaes::ctr_crypt(k, v, in, out);
     tinyaes::secure_zero(k.data(), k.size());
+    tinyaes::secure_zero(in.data(), in.size());
 
-    if (result != tinyaes::Result::Success)
+    if (result != tinyaes::Result::Ok)
         return static_cast<int>(result);
 
     std::memcpy(output, out.data(), out.size());
-    return TINYAES_SUCCESS;
+    return TINYAES_OK;
+}
+
+extern "C" int tinyaes_ctr_encrypt(
+    const uint8_t *key,
+    size_t key_len,
+    const uint8_t *nonce,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *ciphertext,
+    size_t ciphertext_len)
+{
+    if (!key || !nonce || !plaintext || !ciphertext)
+        return TINYAES_INVALID_INPUT_SIZE;
+    if (ciphertext_len < plaintext_len)
+        return TINYAES_INVALID_INPUT_SIZE;
+
+    std::vector<uint8_t> k(key, key + key_len);
+    std::vector<uint8_t> n(nonce, nonce + 12);
+    std::vector<uint8_t> pt(plaintext, plaintext + plaintext_len);
+    std::vector<uint8_t> ct;
+
+    auto result = tinyaes::ctr_encrypt(k, n, pt, ct);
+    tinyaes::secure_zero(k.data(), k.size());
+    tinyaes::secure_zero(pt.data(), pt.size());
+
+    if (result != tinyaes::Result::Ok)
+        return static_cast<int>(result);
+
+    std::memcpy(ciphertext, ct.data(), ct.size());
+    return TINYAES_OK;
+}
+
+extern "C" int tinyaes_ctr_decrypt(
+    const uint8_t *key,
+    size_t key_len,
+    const uint8_t *nonce,
+    const uint8_t *ciphertext,
+    size_t ciphertext_len,
+    uint8_t *plaintext,
+    size_t plaintext_len)
+{
+    if (!key || !nonce || !ciphertext || !plaintext)
+        return TINYAES_INVALID_INPUT_SIZE;
+    if (plaintext_len < ciphertext_len)
+        return TINYAES_INVALID_INPUT_SIZE;
+
+    std::vector<uint8_t> k(key, key + key_len);
+    std::vector<uint8_t> n(nonce, nonce + 12);
+    std::vector<uint8_t> ct(ciphertext, ciphertext + ciphertext_len);
+    std::vector<uint8_t> pt;
+
+    auto result = tinyaes::ctr_decrypt(k, n, ct, pt);
+    tinyaes::secure_zero(k.data(), k.size());
+
+    if (result != tinyaes::Result::Ok)
+    {
+        tinyaes::secure_zero(pt.data(), pt.size());
+        return static_cast<int>(result);
+    }
+
+    std::memcpy(plaintext, pt.data(), pt.size());
+    tinyaes::secure_zero(pt.data(), pt.size());
+    return TINYAES_OK;
 }

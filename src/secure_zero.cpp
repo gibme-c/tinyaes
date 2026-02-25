@@ -68,8 +68,8 @@ namespace tinyaes
         {
             diff |= static_cast<uint8_t>(a[i] ^ b[i]);
         }
-        volatile uint8_t result = static_cast<uint8_t>(diff == 0);
-        return result != 0;
+        uint8_t d = diff; // volatile read is the barrier
+        return d == 0;
     }
 
 } // namespace tinyaes

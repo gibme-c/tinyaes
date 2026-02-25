@@ -123,7 +123,7 @@ namespace tinyaes
         if (rounds == 0)
             return Result::InvalidKeySize;
         if (iv.empty())
-            return Result::InvalidInput;
+            return Result::InvalidIVSize;
 
         uint32_t rk[internal::AES_MAX_RK_WORDS];
         auto key_expand = internal::get_key_expand();
@@ -180,7 +180,7 @@ namespace tinyaes
         secure_zero(rk, sizeof(rk));
         secure_zero(H, sizeof(H));
         secure_zero(J0, sizeof(J0));
-        return Result::Success;
+        return Result::Ok;
     }
 
     Result gcm_decrypt(
@@ -195,9 +195,9 @@ namespace tinyaes
         if (rounds == 0)
             return Result::InvalidKeySize;
         if (iv.empty())
-            return Result::InvalidInput;
+            return Result::InvalidIVSize;
         if (tag.size() != 16)
-            return Result::InvalidInput;
+            return Result::InvalidInputSize;
 
         uint32_t rk[internal::AES_MAX_RK_WORDS];
         auto key_expand = internal::get_key_expand();
@@ -226,7 +226,7 @@ namespace tinyaes
             secure_zero(H, sizeof(H));
             secure_zero(J0, sizeof(J0));
             secure_zero(computed_tag, sizeof(computed_tag));
-            return Result::AuthFailed;
+            return Result::AuthenticationFailed;
         }
 
         // Tag verified — decrypt ciphertext using CTR mode
@@ -264,7 +264,77 @@ namespace tinyaes
         secure_zero(H, sizeof(H));
         secure_zero(J0, sizeof(J0));
         secure_zero(computed_tag, sizeof(computed_tag));
-        return Result::Success;
+        return Result::Ok;
+    }
+
+    Result gcm_encrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce,
+        const std::vector<uint8_t> &plaintext,
+        const std::vector<uint8_t> &aad,
+        std::vector<uint8_t> &ciphertext_and_tag)
+    {
+        std::vector<uint8_t> ct, tag;
+        auto result = gcm_encrypt(key, nonce, aad, plaintext, ct, tag);
+        if (result != Result::Ok)
+            return result;
+
+        ciphertext_and_tag.resize(ct.size() + 16);
+        if (!ct.empty())
+            std::memcpy(ciphertext_and_tag.data(), ct.data(), ct.size());
+        std::memcpy(ciphertext_and_tag.data() + ct.size(), tag.data(), 16);
+        return Result::Ok;
+    }
+
+    Result gcm_encrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &plaintext,
+        const std::vector<uint8_t> &aad,
+        std::vector<uint8_t> &nonce_ciphertext_tag)
+    {
+        auto nonce = generate_nonce();
+        if (nonce.empty())
+            return Result::InternalError;
+
+        std::vector<uint8_t> ct_tag;
+        auto result = gcm_encrypt(key, nonce, plaintext, aad, ct_tag);
+        if (result != Result::Ok)
+            return result;
+
+        nonce_ciphertext_tag.resize(12 + ct_tag.size());
+        std::memcpy(nonce_ciphertext_tag.data(), nonce.data(), 12);
+        std::memcpy(nonce_ciphertext_tag.data() + 12, ct_tag.data(), ct_tag.size());
+        return Result::Ok;
+    }
+
+    Result gcm_decrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce,
+        const std::vector<uint8_t> &ciphertext_and_tag,
+        const std::vector<uint8_t> &aad,
+        std::vector<uint8_t> &plaintext)
+    {
+        if (ciphertext_and_tag.size() < 16)
+            return Result::InvalidInputSize;
+
+        size_t ct_len = ciphertext_and_tag.size() - 16;
+        std::vector<uint8_t> ct(ciphertext_and_tag.begin(), ciphertext_and_tag.begin() + static_cast<ptrdiff_t>(ct_len));
+        std::vector<uint8_t> tag(ciphertext_and_tag.end() - 16, ciphertext_and_tag.end());
+        return gcm_decrypt(key, nonce, aad, ct, tag, plaintext);
+    }
+
+    Result gcm_decrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce_ciphertext_tag,
+        const std::vector<uint8_t> &aad,
+        std::vector<uint8_t> &plaintext)
+    {
+        if (nonce_ciphertext_tag.size() < 28) // 12 nonce + 16 tag minimum
+            return Result::InvalidInputSize;
+
+        std::vector<uint8_t> nonce(nonce_ciphertext_tag.begin(), nonce_ciphertext_tag.begin() + 12);
+        std::vector<uint8_t> ct_tag(nonce_ciphertext_tag.begin() + 12, nonce_ciphertext_tag.end());
+        return gcm_decrypt(key, nonce, ct_tag, aad, plaintext);
     }
 
 } // namespace tinyaes
@@ -283,32 +353,33 @@ extern "C" int tinyaes_gcm_encrypt(
     uint8_t tag[16])
 {
     if (!key || !iv || !tag)
-        return TINYAES_ERROR_INVALID_INPUT;
+        return TINYAES_INVALID_INPUT_SIZE;
     if (plaintext_len > 0 && (!plaintext || !ciphertext))
-        return TINYAES_ERROR_INVALID_INPUT;
+        return TINYAES_INVALID_INPUT_SIZE;
     if (ciphertext_len < plaintext_len)
-        return TINYAES_ERROR_BUFFER_TOO_SMALL;
+        return TINYAES_INVALID_INPUT_SIZE;
 
     std::vector<uint8_t> k(key, key + key_len);
     std::vector<uint8_t> v(iv, iv + iv_len);
-    std::vector<uint8_t> a(aad ? aad : key, aad ? aad + aad_len : key);
-    if (!aad)
-        a.clear();
-    std::vector<uint8_t> pt(plaintext ? plaintext : key, plaintext ? plaintext + plaintext_len : key);
-    if (!plaintext)
-        pt.clear();
+    std::vector<uint8_t> a;
+    if (aad && aad_len > 0)
+        a.assign(aad, aad + aad_len);
+    std::vector<uint8_t> pt;
+    if (plaintext && plaintext_len > 0)
+        pt.assign(plaintext, plaintext + plaintext_len);
     std::vector<uint8_t> ct, t;
 
     auto result = tinyaes::gcm_encrypt(k, v, a, pt, ct, t);
     tinyaes::secure_zero(k.data(), k.size());
+    tinyaes::secure_zero(pt.data(), pt.size());
 
-    if (result != tinyaes::Result::Success)
+    if (result != tinyaes::Result::Ok)
         return static_cast<int>(result);
 
     if (!ct.empty())
         std::memcpy(ciphertext, ct.data(), ct.size());
     std::memcpy(tag, t.data(), 16);
-    return TINYAES_SUCCESS;
+    return TINYAES_OK;
 }
 
 extern "C" int tinyaes_gcm_decrypt(
@@ -325,30 +396,34 @@ extern "C" int tinyaes_gcm_decrypt(
     const uint8_t tag[16])
 {
     if (!key || !iv || !tag)
-        return TINYAES_ERROR_INVALID_INPUT;
+        return TINYAES_INVALID_INPUT_SIZE;
     if (ciphertext_len > 0 && (!ciphertext || !plaintext))
-        return TINYAES_ERROR_INVALID_INPUT;
+        return TINYAES_INVALID_INPUT_SIZE;
     if (plaintext_len < ciphertext_len)
-        return TINYAES_ERROR_BUFFER_TOO_SMALL;
+        return TINYAES_INVALID_INPUT_SIZE;
 
     std::vector<uint8_t> k(key, key + key_len);
     std::vector<uint8_t> v(iv, iv + iv_len);
-    std::vector<uint8_t> a(aad ? aad : key, aad ? aad + aad_len : key);
-    if (!aad)
-        a.clear();
-    std::vector<uint8_t> ct(ciphertext ? ciphertext : key, ciphertext ? ciphertext + ciphertext_len : key);
-    if (!ciphertext)
-        ct.clear();
+    std::vector<uint8_t> a;
+    if (aad && aad_len > 0)
+        a.assign(aad, aad + aad_len);
+    std::vector<uint8_t> ct;
+    if (ciphertext && ciphertext_len > 0)
+        ct.assign(ciphertext, ciphertext + ciphertext_len);
     std::vector<uint8_t> t(tag, tag + 16);
     std::vector<uint8_t> pt;
 
     auto result = tinyaes::gcm_decrypt(k, v, a, ct, t, pt);
     tinyaes::secure_zero(k.data(), k.size());
 
-    if (result != tinyaes::Result::Success)
+    if (result != tinyaes::Result::Ok)
+    {
+        tinyaes::secure_zero(pt.data(), pt.size());
         return static_cast<int>(result);
+    }
 
     if (!pt.empty())
         std::memcpy(plaintext, pt.data(), pt.size());
-    return TINYAES_SUCCESS;
+    tinyaes::secure_zero(pt.data(), pt.size());
+    return TINYAES_OK;
 }

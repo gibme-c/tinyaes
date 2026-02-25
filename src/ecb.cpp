@@ -41,7 +41,7 @@ namespace tinyaes
         if (rounds == 0)
             return Result::InvalidKeySize;
         if (plaintext.empty() || (plaintext.size() % 16) != 0)
-            return Result::InvalidInput;
+            return Result::InvalidInputSize;
 
         uint32_t rk[internal::AES_MAX_RK_WORDS];
         auto key_expand = internal::get_key_expand();
@@ -56,7 +56,7 @@ namespace tinyaes
         }
 
         secure_zero(rk, sizeof(rk));
-        return Result::Success;
+        return Result::Ok;
     }
 
     Result ecb_decrypt(
@@ -68,7 +68,7 @@ namespace tinyaes
         if (rounds == 0)
             return Result::InvalidKeySize;
         if (ciphertext.empty() || (ciphertext.size() % 16) != 0)
-            return Result::InvalidInput;
+            return Result::InvalidInputSize;
 
         uint32_t rk[internal::AES_MAX_RK_WORDS];
         auto key_expand = internal::get_key_expand();
@@ -83,7 +83,7 @@ namespace tinyaes
         }
 
         secure_zero(rk, sizeof(rk));
-        return Result::Success;
+        return Result::Ok;
     }
 
 } // namespace tinyaes
@@ -97,9 +97,9 @@ extern "C" int tinyaes_ecb_encrypt(
     size_t ciphertext_len)
 {
     if (!key || !plaintext || !ciphertext)
-        return TINYAES_ERROR_INVALID_INPUT;
+        return TINYAES_INVALID_INPUT_SIZE;
     if (ciphertext_len < plaintext_len)
-        return TINYAES_ERROR_BUFFER_TOO_SMALL;
+        return TINYAES_INVALID_INPUT_SIZE;
 
     std::vector<uint8_t> k(key, key + key_len);
     std::vector<uint8_t> pt(plaintext, plaintext + plaintext_len);
@@ -107,12 +107,13 @@ extern "C" int tinyaes_ecb_encrypt(
 
     auto result = tinyaes::ecb_encrypt(k, pt, ct);
     tinyaes::secure_zero(k.data(), k.size());
+    tinyaes::secure_zero(pt.data(), pt.size());
 
-    if (result != tinyaes::Result::Success)
+    if (result != tinyaes::Result::Ok)
         return static_cast<int>(result);
 
     std::memcpy(ciphertext, ct.data(), ct.size());
-    return TINYAES_SUCCESS;
+    return TINYAES_OK;
 }
 
 extern "C" int tinyaes_ecb_decrypt(
@@ -124,9 +125,9 @@ extern "C" int tinyaes_ecb_decrypt(
     size_t plaintext_len)
 {
     if (!key || !ciphertext || !plaintext)
-        return TINYAES_ERROR_INVALID_INPUT;
+        return TINYAES_INVALID_INPUT_SIZE;
     if (plaintext_len < ciphertext_len)
-        return TINYAES_ERROR_BUFFER_TOO_SMALL;
+        return TINYAES_INVALID_INPUT_SIZE;
 
     std::vector<uint8_t> k(key, key + key_len);
     std::vector<uint8_t> ct(ciphertext, ciphertext + ciphertext_len);
@@ -135,9 +136,13 @@ extern "C" int tinyaes_ecb_decrypt(
     auto result = tinyaes::ecb_decrypt(k, ct, pt);
     tinyaes::secure_zero(k.data(), k.size());
 
-    if (result != tinyaes::Result::Success)
+    if (result != tinyaes::Result::Ok)
+    {
+        tinyaes::secure_zero(pt.data(), pt.size());
         return static_cast<int>(result);
+    }
 
     std::memcpy(plaintext, pt.data(), pt.size());
-    return TINYAES_SUCCESS;
+    tinyaes::secure_zero(pt.data(), pt.size());
+    return TINYAES_OK;
 }

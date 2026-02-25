@@ -106,6 +106,18 @@ namespace tinyaes
         const std::vector<uint8_t> &ciphertext,
         std::vector<uint8_t> &plaintext);
 
+    // CBC encrypt with PKCS#7 — library generates IV, prepended to ciphertext
+    Result cbc_encrypt_pkcs7(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &plaintext,
+        std::vector<uint8_t> &iv_and_ciphertext);
+
+    // CBC decrypt with PKCS#7 — IV is first 16 bytes of input
+    Result cbc_decrypt_pkcs7(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &iv_and_ciphertext,
+        std::vector<uint8_t> &plaintext);
+
 } // namespace tinyaes
 
 #endif

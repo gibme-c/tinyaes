@@ -33,7 +33,7 @@ extern "C"
 {
 #endif
 
-    // CTR encrypt/decrypt (symmetric operation)
+    // CTR encrypt/decrypt (symmetric operation) — raw 16-byte IV
     TINYAES_EXPORT int tinyaes_ctr_crypt(
         const uint8_t *key,
         size_t key_len,
@@ -42,6 +42,26 @@ extern "C"
         size_t input_len,
         uint8_t *output,
         size_t output_len);
+
+    // CTR encrypt — 12-byte nonce (counter starts at 1)
+    TINYAES_EXPORT int tinyaes_ctr_encrypt(
+        const uint8_t *key,
+        size_t key_len,
+        const uint8_t *nonce,
+        const uint8_t *plaintext,
+        size_t plaintext_len,
+        uint8_t *ciphertext,
+        size_t ciphertext_len);
+
+    // CTR decrypt — 12-byte nonce
+    TINYAES_EXPORT int tinyaes_ctr_decrypt(
+        const uint8_t *key,
+        size_t key_len,
+        const uint8_t *nonce,
+        const uint8_t *ciphertext,
+        size_t ciphertext_len,
+        uint8_t *plaintext,
+        size_t plaintext_len);
 
 #ifdef __cplusplus
 }
@@ -60,6 +80,32 @@ namespace tinyaes
         const std::vector<uint8_t> &iv,
         const std::vector<uint8_t> &input,
         std::vector<uint8_t> &output);
+
+    // CTR encrypt — caller provides nonce (12 bytes, counter starts at 1)
+    Result ctr_encrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce,
+        const std::vector<uint8_t> &plaintext,
+        std::vector<uint8_t> &ciphertext);
+
+    // CTR encrypt — library generates nonce, prepended to output
+    Result ctr_encrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &plaintext,
+        std::vector<uint8_t> &nonce_and_ciphertext);
+
+    // CTR decrypt — caller provides nonce
+    Result ctr_decrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce,
+        const std::vector<uint8_t> &ciphertext,
+        std::vector<uint8_t> &plaintext);
+
+    // CTR decrypt — nonce is first 12 bytes of input
+    Result ctr_decrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce_and_ciphertext,
+        std::vector<uint8_t> &plaintext);
 
 } // namespace tinyaes
 

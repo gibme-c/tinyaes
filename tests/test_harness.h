@@ -75,10 +75,10 @@ namespace test
         {
             std::fprintf(stderr, "%s:%d: ASSERT_EQ failed\n  got:      ", file, line);
             for (auto x : a)
-                std::fprintf(stderr, "%02x", x);
+                std::fprintf(stderr, "%02x", static_cast<unsigned>(x));
             std::fprintf(stderr, "\n  expected: ");
             for (auto x : b)
-                std::fprintf(stderr, "%02x", x);
+                std::fprintf(stderr, "%02x", static_cast<unsigned>(x));
             std::fprintf(stderr, "\n");
             fail_count()++;
         }

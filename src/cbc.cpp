@@ -42,9 +42,9 @@ namespace tinyaes
         if (rounds == 0)
             return Result::InvalidKeySize;
         if (iv.size() != 16)
-            return Result::InvalidInput;
+            return Result::InvalidIVSize;
         if (plaintext.empty() || (plaintext.size() % 16) != 0)
-            return Result::InvalidInput;
+            return Result::InvalidInputSize;
 
         uint32_t rk[internal::AES_MAX_RK_WORDS];
         auto key_expand = internal::get_key_expand();
@@ -69,7 +69,7 @@ namespace tinyaes
 
         secure_zero(rk, sizeof(rk));
         secure_zero(block, sizeof(block));
-        return Result::Success;
+        return Result::Ok;
     }
 
     Result cbc_decrypt(
@@ -82,9 +82,9 @@ namespace tinyaes
         if (rounds == 0)
             return Result::InvalidKeySize;
         if (iv.size() != 16)
-            return Result::InvalidInput;
+            return Result::InvalidIVSize;
         if (ciphertext.empty() || (ciphertext.size() % 16) != 0)
-            return Result::InvalidInput;
+            return Result::InvalidInputSize;
 
         uint32_t rk[internal::AES_MAX_RK_WORDS];
         auto key_expand = internal::get_key_expand();
@@ -107,7 +107,7 @@ namespace tinyaes
         }
 
         secure_zero(rk, sizeof(rk));
-        return Result::Success;
+        return Result::Ok;
     }
 
     // PKCS#7 padding: append N bytes of value N where N = 16 - (len % 16)
@@ -121,7 +121,7 @@ namespace tinyaes
         size_t pad_len = 16 - (plaintext.size() % 16);
         std::vector<uint8_t> padded(plaintext.size() + pad_len);
         std::memcpy(padded.data(), plaintext.data(), plaintext.size());
-        std::memset(padded.data() + plaintext.size(), static_cast<int>(pad_len), pad_len);
+        std::memset(padded.data() + plaintext.size(), static_cast<unsigned char>(pad_len), pad_len);
 
         auto result = cbc_encrypt(key, iv, padded, ciphertext);
         secure_zero(padded.data(), padded.size());
@@ -137,34 +137,74 @@ namespace tinyaes
     {
         std::vector<uint8_t> decrypted;
         auto result = cbc_decrypt(key, iv, ciphertext, decrypted);
-        if (result != Result::Success)
+        if (result != Result::Ok)
             return result;
 
         if (decrypted.empty())
             return Result::InvalidPadding;
 
-        // Constant-time PKCS#7 validation: scan entire last block
+        // Fully constant-time PKCS#7 validation: always scan all 16 bytes of last block
         uint8_t pad_val = decrypted.back();
-        if (pad_val == 0 || pad_val > 16)
-            return Result::InvalidPadding;
 
-        // Verify all padding bytes match (constant-time)
-        volatile uint8_t bad = 0;
-        size_t start = decrypted.size() - pad_val;
-        for (size_t i = start; i < decrypted.size(); ++i)
+        // Range check via arithmetic (no branches):
+        // bad_range is 0xFF if pad_val is out of [1..16], 0x00 otherwise
+        uint8_t bad_range = static_cast<uint8_t>(((pad_val - 1) >> 8) | ((16 - pad_val) >> 8));
+
+        // Always scan exactly 16 bytes of the last block
+        const uint8_t *last_block = decrypted.data() + decrypted.size() - 16;
+        volatile uint8_t bad_pad = 0;
+        for (unsigned j = 0; j < 16; ++j)
         {
-            bad |= static_cast<uint8_t>(decrypted[i] ^ pad_val);
+            // should_be_pad is 0xFF when byte j is in the padding region, 0x00 otherwise
+            // Padding region: positions where (j + pad_val >= 16), i.e. j >= 16 - pad_val
+            uint8_t should_be_pad = static_cast<uint8_t>((15 - j - pad_val) >> 8);
+            bad_pad |= static_cast<uint8_t>(should_be_pad & (last_block[j] ^ pad_val));
         }
 
+        uint8_t bad = static_cast<uint8_t>(bad_range | bad_pad);
         if (bad != 0)
         {
             secure_zero(decrypted.data(), decrypted.size());
             return Result::InvalidPadding;
         }
 
+        size_t start = decrypted.size() - pad_val;
         plaintext.assign(decrypted.begin(), decrypted.begin() + static_cast<ptrdiff_t>(start));
         secure_zero(decrypted.data(), decrypted.size());
-        return Result::Success;
+        return Result::Ok;
+    }
+
+    Result cbc_encrypt_pkcs7(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &plaintext,
+        std::vector<uint8_t> &iv_and_ciphertext)
+    {
+        auto iv = generate_iv();
+        if (iv.empty())
+            return Result::InternalError;
+
+        std::vector<uint8_t> ct;
+        auto result = cbc_encrypt_pkcs7(key, iv, plaintext, ct);
+        if (result != Result::Ok)
+            return result;
+
+        iv_and_ciphertext.resize(16 + ct.size());
+        std::memcpy(iv_and_ciphertext.data(), iv.data(), 16);
+        std::memcpy(iv_and_ciphertext.data() + 16, ct.data(), ct.size());
+        return Result::Ok;
+    }
+
+    Result cbc_decrypt_pkcs7(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &iv_and_ciphertext,
+        std::vector<uint8_t> &plaintext)
+    {
+        if (iv_and_ciphertext.size() < 32)
+            return Result::InvalidInputSize;
+
+        std::vector<uint8_t> iv(iv_and_ciphertext.begin(), iv_and_ciphertext.begin() + 16);
+        std::vector<uint8_t> ct(iv_and_ciphertext.begin() + 16, iv_and_ciphertext.end());
+        return cbc_decrypt_pkcs7(key, iv, ct, plaintext);
     }
 
 } // namespace tinyaes
@@ -180,9 +220,9 @@ extern "C" int tinyaes_cbc_encrypt(
     size_t ciphertext_len)
 {
     if (!key || !iv || !plaintext || !ciphertext)
-        return TINYAES_ERROR_INVALID_INPUT;
+        return TINYAES_INVALID_INPUT_SIZE;
     if (ciphertext_len < plaintext_len)
-        return TINYAES_ERROR_BUFFER_TOO_SMALL;
+        return TINYAES_INVALID_INPUT_SIZE;
 
     std::vector<uint8_t> k(key, key + key_len);
     std::vector<uint8_t> v(iv, iv + 16);
@@ -191,12 +231,13 @@ extern "C" int tinyaes_cbc_encrypt(
 
     auto result = tinyaes::cbc_encrypt(k, v, pt, ct);
     tinyaes::secure_zero(k.data(), k.size());
+    tinyaes::secure_zero(pt.data(), pt.size());
 
-    if (result != tinyaes::Result::Success)
+    if (result != tinyaes::Result::Ok)
         return static_cast<int>(result);
 
     std::memcpy(ciphertext, ct.data(), ct.size());
-    return TINYAES_SUCCESS;
+    return TINYAES_OK;
 }
 
 extern "C" int tinyaes_cbc_decrypt(
@@ -209,9 +250,9 @@ extern "C" int tinyaes_cbc_decrypt(
     size_t plaintext_len)
 {
     if (!key || !iv || !ciphertext || !plaintext)
-        return TINYAES_ERROR_INVALID_INPUT;
+        return TINYAES_INVALID_INPUT_SIZE;
     if (plaintext_len < ciphertext_len)
-        return TINYAES_ERROR_BUFFER_TOO_SMALL;
+        return TINYAES_INVALID_INPUT_SIZE;
 
     std::vector<uint8_t> k(key, key + key_len);
     std::vector<uint8_t> v(iv, iv + 16);
@@ -221,11 +262,15 @@ extern "C" int tinyaes_cbc_decrypt(
     auto result = tinyaes::cbc_decrypt(k, v, ct, pt);
     tinyaes::secure_zero(k.data(), k.size());
 
-    if (result != tinyaes::Result::Success)
+    if (result != tinyaes::Result::Ok)
+    {
+        tinyaes::secure_zero(pt.data(), pt.size());
         return static_cast<int>(result);
+    }
 
     std::memcpy(plaintext, pt.data(), pt.size());
-    return TINYAES_SUCCESS;
+    tinyaes::secure_zero(pt.data(), pt.size());
+    return TINYAES_OK;
 }
 
 extern "C" int tinyaes_cbc_encrypt_pkcs7(
@@ -238,13 +283,13 @@ extern "C" int tinyaes_cbc_encrypt_pkcs7(
     size_t *ciphertext_len)
 {
     if (!key || !iv || !plaintext || !ciphertext || !ciphertext_len)
-        return TINYAES_ERROR_INVALID_INPUT;
+        return TINYAES_INVALID_INPUT_SIZE;
 
     size_t padded_len = plaintext_len + (16 - (plaintext_len % 16));
     if (*ciphertext_len < padded_len)
     {
         *ciphertext_len = padded_len;
-        return TINYAES_ERROR_BUFFER_TOO_SMALL;
+        return TINYAES_INVALID_INPUT_SIZE;
     }
 
     std::vector<uint8_t> k(key, key + key_len);
@@ -254,13 +299,14 @@ extern "C" int tinyaes_cbc_encrypt_pkcs7(
 
     auto result = tinyaes::cbc_encrypt_pkcs7(k, v, pt, ct);
     tinyaes::secure_zero(k.data(), k.size());
+    tinyaes::secure_zero(pt.data(), pt.size());
 
-    if (result != tinyaes::Result::Success)
+    if (result != tinyaes::Result::Ok)
         return static_cast<int>(result);
 
     std::memcpy(ciphertext, ct.data(), ct.size());
     *ciphertext_len = ct.size();
-    return TINYAES_SUCCESS;
+    return TINYAES_OK;
 }
 
 extern "C" int tinyaes_cbc_decrypt_pkcs7(
@@ -273,7 +319,7 @@ extern "C" int tinyaes_cbc_decrypt_pkcs7(
     size_t *plaintext_len)
 {
     if (!key || !iv || !ciphertext || !plaintext || !plaintext_len)
-        return TINYAES_ERROR_INVALID_INPUT;
+        return TINYAES_INVALID_INPUT_SIZE;
 
     std::vector<uint8_t> k(key, key + key_len);
     std::vector<uint8_t> v(iv, iv + 16);
@@ -283,18 +329,18 @@ extern "C" int tinyaes_cbc_decrypt_pkcs7(
     auto result = tinyaes::cbc_decrypt_pkcs7(k, v, ct, pt);
     tinyaes::secure_zero(k.data(), k.size());
 
-    if (result != tinyaes::Result::Success)
+    if (result != tinyaes::Result::Ok)
         return static_cast<int>(result);
 
     if (*plaintext_len < pt.size())
     {
         *plaintext_len = pt.size();
         tinyaes::secure_zero(pt.data(), pt.size());
-        return TINYAES_ERROR_BUFFER_TOO_SMALL;
+        return TINYAES_INVALID_INPUT_SIZE;
     }
 
     std::memcpy(plaintext, pt.data(), pt.size());
     *plaintext_len = pt.size();
     tinyaes::secure_zero(pt.data(), pt.size());
-    return TINYAES_SUCCESS;
+    return TINYAES_OK;
 }

@@ -86,6 +86,36 @@ namespace tinyaes
         const std::vector<uint8_t> &tag,
         std::vector<uint8_t> &plaintext);
 
+    // GCM encrypt — caller provides nonce, tag appended to ciphertext
+    Result gcm_encrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce,
+        const std::vector<uint8_t> &plaintext,
+        const std::vector<uint8_t> &aad,
+        std::vector<uint8_t> &ciphertext_and_tag);
+
+    // GCM encrypt — library generates nonce, output is nonce||ciphertext||tag
+    Result gcm_encrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &plaintext,
+        const std::vector<uint8_t> &aad,
+        std::vector<uint8_t> &nonce_ciphertext_tag);
+
+    // GCM decrypt — caller provides nonce, input is ciphertext||tag
+    Result gcm_decrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce,
+        const std::vector<uint8_t> &ciphertext_and_tag,
+        const std::vector<uint8_t> &aad,
+        std::vector<uint8_t> &plaintext);
+
+    // GCM decrypt — nonce is first 12 bytes of input, rest is ciphertext||tag
+    Result gcm_decrypt(
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &nonce_ciphertext_tag,
+        const std::vector<uint8_t> &aad,
+        std::vector<uint8_t> &plaintext);
+
 } // namespace tinyaes
 
 #endif

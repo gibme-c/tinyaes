@@ -96,6 +96,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         -fno-strict-overflow
     )
     # Stack protector: requires libssp or compiler-rt at link time.
+    # Probe with try_compile to catch Clang+MinGW toolchains that lack libssp.
     include(CheckCXXSourceCompiles)
     set(CMAKE_REQUIRED_FLAGS "-fstack-protector-strong")
     check_cxx_source_compiles("int main() { char buf[64]; buf[0] = 0; return buf[0]; }" HAS_STACK_PROTECTOR_STRONG)
@@ -106,7 +107,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # -fPIC is implied on Windows PE; only needed on ELF/Mach-O
     if(NOT WIN32)
         target_compile_options(tinyaes PRIVATE -fPIC)
-        # Stack clash protection (Linux only)
+        # Stack clash protection (Linux only — not supported on macOS/Apple Clang)
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             target_compile_options(tinyaes PRIVATE -fstack-clash-protection)
         endif()
@@ -118,9 +119,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
             target_compile_options(tinyaes PRIVATE -fcf-protection=full)
         endif()
     endif()
-    # -Wstrict-aliasing=2 only for GCC
+    # -Wstrict-aliasing=2 only for GCC (Clang doesn't support the =2 level)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         target_compile_options(tinyaes PRIVATE -Wstrict-aliasing=2)
+        # libstdc++ container assertions in Debug (bounds checks on operator[], etc.)
         target_compile_options(tinyaes PRIVATE
             $<$<CONFIG:Debug>:-D_GLIBCXX_ASSERTIONS>
         )
@@ -131,10 +133,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
             $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=2>
         )
     endif()
-    # Linker hardening
+    # Linker hardening (use LINK_FLAGS for CMake 3.10 compat)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set_property(TARGET tinyaes APPEND_STRING PROPERTY LINK_FLAGS
             " -Wl,-z,relro,-z,now -Wl,-z,noexecstack")
+        # Reject undefined symbols in shared libs (catches missing TINYAES_EXPORT)
         if(BUILD_SHARED_LIBS)
             set_property(TARGET tinyaes APPEND_STRING PROPERTY LINK_FLAGS " -Wl,-z,defs")
         endif()
@@ -158,6 +161,7 @@ elseif(MSVC)
     endif()
     set_property(TARGET tinyaes APPEND_STRING PROPERTY LINK_FLAGS
         " /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA")
+    # CET shadow stack compatibility
     check_cxx_compiler_flag("/guard:ehcont" HAS_GUARD_EHCONT)
     if(HAS_GUARD_EHCONT)
         target_compile_options(tinyaes PRIVATE /guard:ehcont)
@@ -166,16 +170,26 @@ elseif(MSVC)
 endif()
 
 # --- Per-backend SIMD compile flags ---
+# MinGW GCC + Debug: Windows x64 ABI only guarantees 16-byte stack alignment,
+# but YMM/ZMM registers need 32/64-byte alignment. At -O0, GCC spills AVX
+# registers to the stack with aligned moves (vmovdqa), which SIGSEGV on the
+# misaligned stack. Force -O1 for SIMD backends in Debug mode so GCC keeps
+# values in registers. -mpreferred-stack-boundary=5 is blocked by the ABI.
+set(_MINGW_SIMD_FIX "")
+if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(_MINGW_SIMD_FIX " $<$<CONFIG:Debug>:-O1>")
+endif()
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64" AND NOT FORCE_PORTABLE)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         set_source_files_properties(src/backend/aes_aesni.cpp PROPERTIES
             COMPILE_FLAGS "-maes -msse4.1")
         set_source_files_properties(src/backend/aes_vaes.cpp PROPERTIES
-            COMPILE_FLAGS "-mavx512f -mvaes -maes -msse4.1")
+            COMPILE_FLAGS "-mavx512f -mvaes -maes -msse4.1${_MINGW_SIMD_FIX}")
         set_source_files_properties(src/backend/ghash_pclmulqdq.cpp PROPERTIES
             COMPILE_FLAGS "-mpclmul -msse4.1")
         set_source_files_properties(src/backend/ghash_vpclmulqdq.cpp PROPERTIES
-            COMPILE_FLAGS "-mavx512f -mvpclmulqdq -mpclmul -msse4.1")
+            COMPILE_FLAGS "-mavx512f -mvpclmulqdq -mpclmul -msse4.1${_MINGW_SIMD_FIX}")
     elseif(MSVC)
         # MSVC: AES-NI and PCLMULQDQ available without extra flags on x64
         set_source_files_properties(src/backend/aes_vaes.cpp PROPERTIES

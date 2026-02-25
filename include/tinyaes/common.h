@@ -56,12 +56,14 @@
 #define TINYAES_GCM_IV_SIZE 12
 
 // C error codes
-#define TINYAES_SUCCESS 0
-#define TINYAES_ERROR_INVALID_KEY_SIZE (-1)
-#define TINYAES_ERROR_INVALID_INPUT (-2)
-#define TINYAES_ERROR_INVALID_PADDING (-3)
-#define TINYAES_ERROR_AUTH_FAILED (-4)
-#define TINYAES_ERROR_BUFFER_TOO_SMALL (-5)
+#define TINYAES_OK 0
+#define TINYAES_INVALID_KEY_SIZE (-1)
+#define TINYAES_INVALID_IV_SIZE (-2)
+#define TINYAES_INVALID_NONCE_SIZE (-3)
+#define TINYAES_INVALID_INPUT_SIZE (-4)
+#define TINYAES_INVALID_PADDING (-5)
+#define TINYAES_AUTH_FAILED (-6)
+#define TINYAES_INTERNAL_ERROR (-7)
 
 #ifdef __cplusplus
 extern "C"
@@ -69,6 +71,10 @@ extern "C"
 #endif
 
     TINYAES_EXPORT int tinyaes_constant_time_equal(const uint8_t *a, const uint8_t *b, size_t len);
+
+    TINYAES_EXPORT int tinyaes_generate_iv(uint8_t out[16]);
+
+    TINYAES_EXPORT int tinyaes_generate_nonce(uint8_t out[12]);
 
 #ifdef __cplusplus
 }
@@ -81,12 +87,14 @@ namespace tinyaes
 
     enum class Result
     {
-        Success = 0,
+        Ok = 0,
         InvalidKeySize = -1,
-        InvalidInput = -2,
-        InvalidPadding = -3,
-        AuthFailed = -4,
-        BufferTooSmall = -5
+        InvalidIVSize = -2,
+        InvalidNonceSize = -3,
+        InvalidInputSize = -4,
+        InvalidPadding = -5,
+        AuthenticationFailed = -6,
+        InternalError = -7
     };
 
     void secure_zero(void *ptr, size_t len);
@@ -101,6 +109,10 @@ namespace tinyaes
     }
 
     int generate_iv(uint8_t *out, size_t len);
+
+    std::vector<uint8_t> generate_iv();
+
+    std::vector<uint8_t> generate_nonce();
 
 } // namespace tinyaes
 

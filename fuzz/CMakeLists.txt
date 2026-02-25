@@ -1,6 +1,10 @@
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     return()
 endif()
+
+# libFuzzer is only reliably available on Linux Clang.
+# macOS: Apple Clang lacks the runtime; Homebrew LLVM has ABI mismatches
+# with macOS system libc++. Windows: CRT mismatches in Debug/Release.
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     return()
 endif()
@@ -19,6 +23,13 @@ foreach(target ${FUZZ_TARGETS})
         CXX_EXTENSIONS OFF
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/fuzz
     )
-    target_compile_options(${target} PRIVATE -fsanitize=fuzzer,address)
+    target_compile_options(${target} PRIVATE
+        -Wall -Wextra -Wpedantic -Werror
+        -fsanitize=fuzzer,address
+    )
     set_property(TARGET ${target} APPEND_STRING PROPERTY LINK_FLAGS " -fsanitize=fuzzer,address")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set_property(TARGET ${target} APPEND_STRING PROPERTY LINK_FLAGS
+            " -Wl,-z,relro,-z,now -Wl,-z,noexecstack")
+    endif()
 endforeach()

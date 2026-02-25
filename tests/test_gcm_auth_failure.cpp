@@ -35,7 +35,7 @@ TEST(gcm_auth_fail_tampered_ciphertext)
 
     std::vector<uint8_t> pt;
     auto result = tinyaes::gcm_decrypt(make_key(), make_iv(), {}, ct, tag, pt);
-    ASSERT_TRUE(result == tinyaes::Result::AuthFailed);
+    ASSERT_TRUE(result == tinyaes::Result::AuthenticationFailed);
     ASSERT_TRUE(pt.empty());
 }
 
@@ -49,7 +49,7 @@ TEST(gcm_auth_fail_tampered_tag)
 
     std::vector<uint8_t> pt;
     auto result = tinyaes::gcm_decrypt(make_key(), make_iv(), {}, ct, tag, pt);
-    ASSERT_TRUE(result == tinyaes::Result::AuthFailed);
+    ASSERT_TRUE(result == tinyaes::Result::AuthenticationFailed);
     ASSERT_TRUE(pt.empty());
 }
 
@@ -64,7 +64,7 @@ TEST(gcm_auth_fail_tampered_aad)
 
     std::vector<uint8_t> pt;
     auto result = tinyaes::gcm_decrypt(make_key(), make_iv(), bad_aad, ct, tag, pt);
-    ASSERT_TRUE(result == tinyaes::Result::AuthFailed);
+    ASSERT_TRUE(result == tinyaes::Result::AuthenticationFailed);
     ASSERT_TRUE(pt.empty());
 }
 
@@ -78,7 +78,7 @@ TEST(gcm_auth_fail_wrong_key)
 
     std::vector<uint8_t> pt;
     auto result = tinyaes::gcm_decrypt(wrong_key, make_iv(), {}, ct, tag, pt);
-    ASSERT_TRUE(result == tinyaes::Result::AuthFailed);
+    ASSERT_TRUE(result == tinyaes::Result::AuthenticationFailed);
     ASSERT_TRUE(pt.empty());
 }
 
@@ -92,6 +92,6 @@ TEST(gcm_auth_fail_wrong_iv)
 
     std::vector<uint8_t> pt;
     auto result = tinyaes::gcm_decrypt(make_key(), wrong_iv, {}, ct, tag, pt);
-    ASSERT_TRUE(result == tinyaes::Result::AuthFailed);
+    ASSERT_TRUE(result == tinyaes::Result::AuthenticationFailed);
     ASSERT_TRUE(pt.empty());
 }

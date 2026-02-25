@@ -63,4 +63,30 @@ namespace tinyaes
 #endif
     }
 
+    std::vector<uint8_t> generate_iv()
+    {
+        std::vector<uint8_t> iv(16);
+        if (generate_iv(iv.data(), 16) != 0)
+            iv.clear();
+        return iv;
+    }
+
+    std::vector<uint8_t> generate_nonce()
+    {
+        std::vector<uint8_t> nonce(12);
+        if (generate_iv(nonce.data(), 12) != 0)
+            nonce.clear();
+        return nonce;
+    }
+
 } // namespace tinyaes
+
+extern "C" int tinyaes_generate_iv(uint8_t out[16])
+{
+    return tinyaes::generate_iv(out, 16);
+}
+
+extern "C" int tinyaes_generate_nonce(uint8_t out[12])
+{
+    return tinyaes::generate_iv(out, 12);
+}
