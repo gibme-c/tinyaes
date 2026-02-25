@@ -47,6 +47,7 @@ static void tamper_test(const std::vector<uint8_t> &key, const std::vector<uint8
         bad_ct[tamper_byte % bad_ct.size()] ^= 0x01;
         auto result = tinyaes::gcm_decrypt(key, iv, aad, bad_ct, tag, pt);
         assert(result == tinyaes::Result::AuthenticationFailed);
+        (void)result;
     }
 
     // Tamper tag
@@ -55,6 +56,7 @@ static void tamper_test(const std::vector<uint8_t> &key, const std::vector<uint8
         bad_tag[tamper_byte % 16] ^= 0x01;
         auto result = tinyaes::gcm_decrypt(key, iv, aad, ct, bad_tag, pt);
         assert(result == tinyaes::Result::AuthenticationFailed);
+        (void)result;
     }
 
     // Tamper AAD (if non-empty)
@@ -64,6 +66,7 @@ static void tamper_test(const std::vector<uint8_t> &key, const std::vector<uint8
         bad_aad[tamper_byte % bad_aad.size()] ^= 0x01;
         auto result = tinyaes::gcm_decrypt(key, iv, bad_aad, ct, tag, pt);
         assert(result == tinyaes::Result::AuthenticationFailed);
+        (void)result;
     }
 }
 
