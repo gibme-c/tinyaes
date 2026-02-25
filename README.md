@@ -1,5 +1,7 @@
 # tinyaes
 
+[![CI Build Tests](https://github.com/gibme-c/tinyaes/actions/workflows/ci.yml/badge.svg)](https://github.com/gibme-c/tinyaes/actions/workflows/ci.yml)
+
 A zero-dependency C++17 [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard) encryption library supporting AES-128, AES-192, and AES-256 in ECB, CBC, CTR, and GCM modes, with SIMD-accelerated backends and runtime CPU dispatch.
 
 AES (Advanced Encryption Standard) is the most widely deployed symmetric cipher, used in TLS, disk encryption, VPNs, and virtually every modern security protocol. This library provides the complete set of block cipher modes you need for real applications -- from raw ECB blocks to authenticated encryption with GCM -- with both a C API and a modern C++ API. On x86_64, AES-NI and VAES hardware instructions are selected at runtime; on ARM64, the Crypto Extensions backend is used. A portable T-table implementation is always available as a fallback.
