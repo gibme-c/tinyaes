@@ -57,10 +57,14 @@ if(BUILD_SHARED_LIBS)
 endif()
 
 if(FORCE_PORTABLE)
-    target_compile_definitions(tinyaes PUBLIC TINYAES_FORCE_PORTABLE=1)
+    target_compile_definitions(tinyaes PRIVATE TINYAES_FORCE_PORTABLE=1)
 endif()
 
 target_include_directories(tinyaes PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+# Consumers get SYSTEM includes so tinyaes headers don't trigger their warnings
+target_include_directories(tinyaes SYSTEM INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 # Internal headers (src/) for the library itself
